@@ -1,0 +1,41 @@
+# Publishes what is pushed to the "drop" branch as the download releases:
+#   app/  (EasyBuys-*.apk + SHA256SUMS)          -> release "latest"
+#   link/ (Aronium Link installer + signed manifest) -> release "link-latest"
+# Only downloads live here – no code, no business data.
+name: Publish downloads
+on:
+  push:
+    branches: [drop]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: drop
+      - name: Check the files against their fingerprints
+        run: |
+          set -e
+          if [ -d app ]; then (cd app && sha256sum -c SHA256SUMS); fi
+          if [ -f link/EasyBuysAroniumLink-Setup.exe.sha256 ]; then (cd link && sha256sum -c EasyBuysAroniumLink-Setup.exe.sha256); fi
+      - name: Publish the app
+        if: hashFiles('app/SHA256SUMS') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          APK=$(ls app/EasyBuys-*.apk | grep -v 32bit | head -1)
+          TITLE="Latest app – $(basename "$APK" .apk | sed -E 's/EasyBuys-v([0-9.]+)-build([0-9]+)/Easy Buys v\1 (build \2)/')"
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest app/* --target drop --title "$TITLE" --notes "Open this page on the phone or tablet and tap the .apk to install (if Android says it is not compatible, use the -32bit one). Phones also find and download it by themselves."
+      - name: Publish the Aronium Link
+        if: hashFiles('link/link-version.json.sig') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          B=$(python3 -c "import json;print(json.load(open('link/link-version.json'))['build'])")
+          gh release delete link-latest --yes --cleanup-tag || true
+          gh release create link-latest link/* --target drop --title "Aronium Link for Windows (build $B)" --notes "For the till PCs. The Link updates itself from here (signed). To install by hand: download EasyBuysAroniumLink-Setup.exe and run it."
